@@ -228,6 +228,24 @@ class ArgParser {
         type: "string",
       },
 
+      "screenshot": {
+        describe: "If set, take a 1920x1080 screenshot of initially visible area of the page, wrap them into WARC files and place them in the folder screenshots/",
+        type: "boolean",
+        default: false,
+      },
+
+      "fullPageScreenshot": {
+        describe: "If set, take a full page screenshot of the page, wrap them into WARC files and place them in the folder screenshots/",
+        type: "boolean",
+        default: false,
+      },
+
+      "thumbnail": {
+        describe: "If set, take a thumbnail of initially visible area of the page, wrap them into WARC files and place them in the folder screenshots/",
+        type: "boolean",
+        default: false,
+      },
+
       "screencastPort": {
         describe: "If set to a non-zero value, starts an HTTP server with screencast accessible on this port",
         type: "number",

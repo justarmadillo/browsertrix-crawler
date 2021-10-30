@@ -60,8 +60,8 @@ Browsertrix Crawler includes a number of additional command-line options, explai
       --version                             Show version number        [boolean]
       --seeds, --url                        The URL to start crawling from
                                                            [array] [default: []]
-      --seedFile, --urlFile                 If set, read a list of seed urls,
-                                            one per line, from the specified
+      --seedFile, --urlFile                 If set, read a list of seed urls, on
+                                            e per line, from the specified
                                                                         [string]
   -w, --workers                             The number of workers to run in
                                             parallel       [number] [default: 1]
@@ -96,6 +96,8 @@ Browsertrix Crawler includes a number of additional command-line options, explai
                                             the immediate directory of URL)
       --scopeExcludeRx, --exclude           Regex of page URLs that should be
                                             excluded from the crawl.
+      --screenshot, Screenshot              Saves a screenshot of the page into a
+                                            warc in the screenshot folder.
       --allowHashUrls                       Allow Hashtag URLs, useful for
                                             single-page-application crawling or
                                             when different hashtags load dynamic
@@ -161,9 +163,25 @@ Browsertrix Crawler includes a number of additional command-line options, explai
       --profile                             Path to tar.gz file which will be
                                             extracted and used as the browser
                                             profile                     [string]
+      --screenshot                          If set, take a 1920x1080 screenshot
+                                            of initially visible area of the pag
+                                            e, wrap them into WARC files and pla
+                                            ce them in the folder screenshots/
+                                                      [boolean] [default: false]
+      --fullPageScreenshot                  If set, take a full page screenshot
+                                            of the page, wrap them into WARC fil
+                                            es and place them in the folder scre
+                                            enshots/  [boolean] [default: false]
+      --thumbnail                           If set, take a thumbnail of initiall
+                                            y visible area of the page, wrap the
+                                            m into WARC files and place them in
+                                            the folder screenshots/
+                                                      [boolean] [default: false]
       --screencastPort                      If set to a non-zero value, starts
                                             an HTTP server with screencast
                                             accessible on this port
+                                             on each page
+                [string] [default: "autoplay,autofetch,autoscroll,siteSpecific"]
                                                            [number] [default: 0]
       --screencastRedis                     If set, will use the state store
                                             redis pubsub for screencasting.

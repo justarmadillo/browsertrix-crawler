@@ -20,6 +20,7 @@ import * as warcio from "warcio";
 import { TextExtract } from "./util/textextract.js";
 import { initStorage, getFileSize, getDirSize, interpolateFilename } from "./util/storage.js";
 import { ScreenCaster, WSTransport, RedisPubSubTransport } from "./util/screencaster.js";
+import { Screenshots, isScreenshotSelected } from "./util/screenshots.js";
 import { parseArgs } from "./util/argParser.js";
 import { initRedis } from "./util/redis.js";
 
@@ -283,6 +284,15 @@ export class Crawler {
     }
   }
 
+  initScreenshots(params) {
+    if (isScreenshotSelected(params)) {
+      this.screenShotDir = path.join(this.collDir, "screenshots");
+      if (!fs.existsSync(this.screenShotDir)) {
+        fs.mkdirSync(this.screenShotDir);
+      }
+    }
+  }
+
   get puppeteerArgs() {
     // Puppeter Options
     return {
@@ -386,6 +396,21 @@ export class Crawler {
       await this.driver({page, data, crawler: this});
 
       const title = await page.title();
+
+      if (isScreenshotSelected(this.params)) {
+        const pageID = uuidv4();
+        let screenshots = new Screenshots({page, id: pageID, url: data.url, directory: this.screenShotDir});
+        if (this.params.screenshot) {
+          await screenshots.take();
+        }
+        if (this.params.fullPageScreenshot) {
+          await screenshots.takeFullPage();
+        }
+        if (this.params.thumbnail) {
+          await screenshots.takeThumbnail();
+        }
+      }
+
       let text = "";
       if (this.params.text && page.isHTMLPage) {
         const client = await page.target().createCDPSession();
@@ -429,7 +454,7 @@ export class Crawler {
       "software": `Browsertrix-Crawler ${packageFileJSON.version} (with warcio.js ${warcioPackageJSON.version} pywb ${pywbVersion})`,
       "format": "WARC File Format 1.0"
     };
-    
+
     const warcInfo = {...info, ...this.params.warcInfo, };
     const record = await warcio.WARCRecord.createWARCInfo({filename, type, warcVersion}, warcInfo);
     const buffer = await warcio.WARCSerializer.serialize(record, {gzip: true});
@@ -576,6 +601,7 @@ export class Crawler {
     this.cluster.task((opts) => this.crawlPage(opts));
 
     await this.initPages();
+    await this.initScreenshots(this.params);
 
     if (this.params.blockAds) {
       this.adBlockRules = new AdBlockRules(this.captureBasePrefix, this.params.adBlockMessage, (text) => this.debugLog(text));
@@ -656,6 +682,8 @@ export class Crawler {
     this.statusLog("Generating WACZ");
 
     const archiveDir = path.join(this.collDir, "archive");
+
+    // SCREENSHOTS NOT ADDED! PUT THEM IN SUBDIR?
 
     // Get a list of the warcs inside
     const warcFileList = await fsp.readdir(archiveDir);
