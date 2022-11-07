@@ -683,10 +683,15 @@ export class Crawler {
 
     const archiveDir = path.join(this.collDir, "archive");
 
-    // SCREENSHOTS NOT ADDED! PUT THEM IN SUBDIR?
-
     // Get a list of the warcs inside
     const warcFileList = await fsp.readdir(archiveDir);
+
+    // get a list of screenshot warcs
+    let screenshotWarcFileList = [];
+    const screenshotDir = path.join(this.collDir, "screenshots");
+    if (fs.existsSync(screenshotDir)) {
+      screenshotWarcFileList = await fsp.readdir(screenshotDir);
+    }
 
     // is finished (>0 pages and all pages written)
     const isFinished = await this.crawlState.isFinished();
@@ -718,6 +723,7 @@ export class Crawler {
     createArgs.push("-f");
 
     warcFileList.forEach((val, index) => createArgs.push(path.join(archiveDir, val))); // eslint-disable-line  no-unused-vars
+    screenshotWarcFileList.forEach((val, index) => createArgs.push(path.join(screenshotDir, val))); // eslint-disable-line  no-unused-vars
 
     // create WACZ
     const waczResult = await this.awaitProcess(child_process.spawn("wacz" , createArgs, {stdio: "inherit"}));
