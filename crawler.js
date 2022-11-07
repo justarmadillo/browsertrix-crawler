@@ -398,6 +398,9 @@ export class Crawler {
       const title = await page.title();
 
       if (isScreenshotSelected(this.params)) {
+        if (!page.isHTMLPage) {
+          console.log("Skipping screenshots for non-HTML page");
+        }
         const pageID = uuidv4();
         let screenshots = new Screenshots({page, id: pageID, url: data.url, directory: this.screenShotDir});
         if (this.params.screenshot) {

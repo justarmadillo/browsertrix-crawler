@@ -402,8 +402,8 @@ class ArgParser {
     switch (argv.newContext) {
     case "page":
       argv.newContext = Cluster.CONCURRENCY_PAGE;
-      if (argv.screencastPort && argv.workers > 1) {
-        console.log("Note: to support screencasting with >1 workers, newContext set to 'window' instead of 'page'");
+      if ((argv.thumbnail || argv.screenshot || argv.fullPageScreenshot || argv.screencastPort) && argv.workers > 1) {
+        console.log("Note: to support screencasting and/or screenshotting with >1 workers, newContext set to 'window' instead of 'page'");
         argv.newContext = ReuseWindowConcurrency;
       }
       break;
