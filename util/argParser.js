@@ -46,8 +46,8 @@ class ArgParser {
       },
 
       "newContext": {
-        describe: "The context for each new capture, can be a new: page, window, session or browser.",
-        default: "page",
+        describe: "Deprecated as of 0.8.0, any values passed will be ignored",
+        default: null,
         type: "string"
       },
 
@@ -395,33 +395,16 @@ class ArgParser {
     }
     argv.behaviorOpts = JSON.stringify(behaviorOpts);
 
-    if (!argv.newContext) {
-      argv.newContext = "page";
+    if (argv.newContext) {
+      console.log("Note: The newContext argument is deprecated in 0.8.0. Values passed to this option will be ignored");
     }
 
-    switch (argv.newContext) {
-    case "page":
-      argv.newContext = Cluster.CONCURRENCY_PAGE;
-      if ((argv.thumbnail || argv.screenshot || argv.fullPageScreenshot || argv.screencastPort) && argv.workers > 1) {
-        console.log("Note: to support screencasting and/or screenshotting with >1 workers, newContext set to 'window' instead of 'page'");
-        argv.newContext = ReuseWindowConcurrency;
-      }
-      break;
-
-    case "session":
-      argv.newContext = Cluster.CONCURRENCY_CONTEXT;
-      break;
-
-    case "browser":
-      argv.newContext = Cluster.CONCURRENCY_BROWSER;
-      break;
-
-    case "window":
+    if (argv.workers > 1) {
+      console.log("Window context being used to support >1 workers");
       argv.newContext = ReuseWindowConcurrency;
-      break;
-
-    default:
-      throw new Error("Invalid newContext, must be one of: page, session, browser");
+    } else {
+      console.log("Page context being used with 1 worker");
+      argv.newContext = Cluster.CONCURRENCY_PAGE;
     }
 
     if (argv.mobileDevice) {

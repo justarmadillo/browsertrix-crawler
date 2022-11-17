@@ -56,177 +56,175 @@ Browsertrix Crawler includes a number of additional command-line options, explai
       <summary><b>The Browsertrix Crawler docker image currently accepts the following parameters:</b></summary>
 
 ```
-      --help                                Show help                  [boolean]
-      --version                             Show version number        [boolean]
-      --seeds, --url                        The URL to start crawling from
-                                                           [array] [default: []]
-      --seedFile, --urlFile                 If set, read a list of seed urls, on
-                                            e per line, from the specified
-                                                                        [string]
-  -w, --workers                             The number of workers to run in para
-                                            llel           [number] [default: 1]
-      --crawlId, --id                       A user provided ID for this crawl or
-                                             crawl configuration (can also be se
-                                            t via CRAWL_ID env var)
-                                              [string] [default: "c5e7439c397c"]
-      --newContext                          The context for each new capture, ca
-                                            n be a new: page, window, session or
-                                             browser. [string] [default: "page"]
-      --waitUntil                           Puppeteer page.goto() condition to w
-                                            ait for before continuing, can be mu
-                                            ltiple separate by ','
-                                                               [default: "load"]
-      --depth                               The depth of the crawl for all seeds
-                                                          [number] [default: -1]
-      --extraHops                           Number of extra 'hops' to follow, be
-                                            yond the current scope
-                                                           [number] [default: 0]
-      --limit                               Limit crawl to this number of pages
-                                                           [number] [default: 0]
-      --timeout                             Timeout for each page to load (in se
-                                            conds)        [number] [default: 90]
-      --scopeType                           A predfined scope of the crawl. For
-                                            more customization, use 'custom' and
-                                             set scopeIncludeRx regexes
-  [string] [choices: "page", "page-spa", "prefix", "host", "domain", "any", "cus
-                                                                           tom"]
-      --scopeIncludeRx, --include           Regex of page URLs that should be in
-                                            cluded in the crawl (defaults to the
-                                             immediate directory of URL)
-      --scopeExcludeRx, --exclude           Regex of page URLs that should be ex
-                                            cluded from the crawl.
-      --allowHashUrls                       Allow Hashtag URLs, useful for singl
-                                            e-page-application crawling or when
-                                            different hashtags load dynamic cont
-                                            ent
-      --blockRules                          Additional rules for blocking certai
-                                            n URLs from being loaded, by URL reg
-                                            ex and optionally via text match in
-                                            an iframe      [array] [default: []]
-      --blockMessage                        If specified, when a URL is blocked,
-                                             a record with this error message is
-                                             added instead              [string]
-      --blockAds, --blockads                If set, block advertisements from be
-                                            ing loaded (based on Stephen Black's
-                                             blocklist)
-                                                      [boolean] [default: false]
-      --adBlockMessage                      If specified, when an ad is blocked,
-                                             a record with this error message is
-                                             added instead              [string]
-  -c, --collection                          Collection name to crawl to (replay
-                                            will be accessible under this name i
-                                            n pywb preview)
-                                                 [string] [default: "crawl-@ts"]
-      --headless                            Run in headless mode, otherwise star
-                                            t xvfb    [boolean] [default: false]
-      --driver                              JS driver for the crawler
-                                        [string] [default: "./defaultDriver.js"]
-      --generateCDX, --generatecdx, --gene  If set, generate index (CDXJ) for us
-      rateCdx                               e with pywb after crawl is done
-                                                      [boolean] [default: false]
-      --combineWARC, --combinewarc, --comb  If set, combine the warcs
-      ineWarc                                         [boolean] [default: false]
-      --rolloverSize                        If set, declare the rollover size
-                                                  [number] [default: 1000000000]
-      --generateWACZ, --generatewacz, --ge  If set, generate wacz
-      nerateWacz                                      [boolean] [default: false]
-      --logging                             Logging options for crawler, can inc
-                                            lude: stats, pywb, behaviors, behavi
-                                            ors-debug, jserrors
-                                                     [string] [default: "stats"]
-      --text                                If set, extract text to the pages.js
-                                            onl file  [boolean] [default: false]
-      --cwd                                 Crawl working directory for captures
-                                             (pywb root). If not set, defaults t
-                                            o process.cwd()
-                                                   [string] [default: "/crawls"]
-      --mobileDevice                        Emulate mobile device by name from:
-                                            https://github.com/puppeteer/puppete
-                                            er/blob/main/src/common/DeviceDescri
-                                            ptors.ts                    [string]
-      --userAgent                           Override user-agent with specified s
-                                            tring                       [string]
-      --userAgentSuffix                     Append suffix to existing browser us
-                                            er-agent (ex: +MyCrawler, info@examp
-                                            le.com)                     [string]
-      --useSitemap, --sitemap               If enabled, check for sitemaps at /s
-                                            itemap.xml, or custom URL if URL is
-                                            specified
-      --statsFilename                       If set, output stats as JSON to this
-                                             file. (Relative filename resolves t
-                                            o crawl working directory)
-      --behaviors                           Which background behaviors to enable
-                                            on each page
-                           [string] [default: "autoplay,autofetch,siteSpecific"]
-      --behaviorTimeout                     If >0, timeout (in seconds) for
-                                            in-page behavior will run on each
-                                            page. If 0, a behavior can run until
-                                            finish.       [number] [default: 90]
-      --profile                             Path to tar.gz file which will be
-                                            extracted and used as the browser
-                                            profile                     [string]
-      --screenshot                          If set, take a 1920x1080 screenshot
-                                            of initially visible area of the pag
-                                            e, wrap them into WARC files and pla
-                                            ce them in the folder screenshots/
-                                                      [boolean] [default: false]
-      --fullPageScreenshot                  If set, take a full page screenshot
-                                            of the page, wrap them into WARC fil
-                                            es and place them in the folder scre
-                                            enshots/  [boolean] [default: false]
-      --thumbnail                           If set, take a thumbnail of initiall
-                                            y visible area of the page, wrap the
-                                            m into WARC files and place them in
-                                            the folder screenshots/
-                                                      [boolean] [default: false]
-      --screencastPort                      If set to a non-zero value, starts
-                                            an HTTP server with screencast
-                                            accessible on this port
-                                             on each page
-                [string] [default: "autoplay,autofetch,autoscroll,siteSpecific"]
-                                                           [number] [default: 0]
-      --screencastRedis                     If set, will use the state store red
-                                            is pubsub for screencasting. Require
-                                            s --redisStoreUrl to be set
-                                                      [boolean] [default: false]
-      --warcInfo, --warcinfo                Optional fields added to the warcinf
-                                            o record in combined WARCs
-      --redisStoreUrl                       If set, url for remote redis server
-                                            to store state. Otherwise, using in-
-                                            memory store                [string]
-      --saveState                           If the crawl state should be seriali
-                                            zed to the crawls/ directory. Defaul
-                                            ts to 'partial', only saved when cra
-                                            wl is interrupted
-           [string] [choices: "never", "partial", "always"] [default: "partial"]
-      --saveStateInterval                   If save state is set to 'always', al
-                                            so save state during the crawl at th
-                                            is interval (in seconds)
-                                                         [number] [default: 300]
-      --saveStateHistory                    Number of save states to keep during
-                                             the duration of a crawl
-                                                           [number] [default: 5]
-      --sizeLimit                           If set, save state and exit if size
-                                            limit exceeds this value
-                                                           [number] [default: 0]
-      --timeLimit                           If set, save state and exit after ti
-                                            me limit, in seconds
-                                                           [number] [default: 0]
-      --healthCheckPort                     port to run healthcheck on
-                                                           [number] [default: 0]
-      --overwrite                           overwrite current crawl data: if set
-                                            , existing collection directory will
-                                             be deleted before crawl is started
-                                                      [boolean] [default: false]
-      --waitOnDone                          if set, wait for interrupt signal wh
-                                            en finished instead of exiting
-                                                      [boolean] [default: false]
-      --netIdleWait                         if set, wait for network idle after
-                                            page load and after behaviors are do
-                                            ne (in seconds). if -1 (default), de
-                                            termine based on scope
-                                                          [number] [default: -1]
-      --config                              Path to YAML config file
+    --help                                Show help                  [boolean]
+    --version                             Show version number        [boolean]
+    --seeds, --url                        The URL to start crawling from
+                                                         [array] [default: []]
+    --seedFile, --urlFile                 If set, read a list of seed urls, on
+                                          e per line, from the specified
+                                                                      [string]
+-w, --workers                             The number of workers to run in para
+                                          llel           [number] [default: 1]
+    --crawlId, --id                       A user provided ID for this crawl or
+                                           crawl configuration (can also be se
+                                          t via CRAWL_ID env var)
+                                            [string] [default: "2feaf898a8c5"]
+    --newContext                          Deprecated as of 0.8.0, any values p
+                                          assed will be ignored
+                                                      [string] [default: null]
+    --waitUntil                           Puppeteer page.goto() condition to w
+                                          ait for before continuing, can be mu
+                                          ltiple separate by ','
+                                                             [default: "load"]
+    --depth                               The depth of the crawl for all seeds
+                                                        [number] [default: -1]
+    --extraHops                           Number of extra 'hops' to follow, be
+                                          yond the current scope
+                                                         [number] [default: 0]
+    --limit                               Limit crawl to this number of pages
+                                                         [number] [default: 0]
+    --timeout                             Timeout for each page to load (in se
+                                          conds)        [number] [default: 90]
+    --scopeType                           A predfined scope of the crawl. For
+                                          more customization, use 'custom' and
+                                           set scopeIncludeRx regexes
+[string] [choices: "page", "page-spa", "prefix", "host", "domain", "any", "cus
+                                                                         tom"]
+    --scopeIncludeRx, --include           Regex of page URLs that should be in
+                                          cluded in the crawl (defaults to the
+                                           immediate directory of URL)
+    --scopeExcludeRx, --exclude           Regex of page URLs that should be ex
+                                          cluded from the crawl.
+    --allowHashUrls                       Allow Hashtag URLs, useful for singl
+                                          e-page-application crawling or when
+                                          different hashtags load dynamic cont
+                                          ent
+    --blockRules                          Additional rules for blocking certai
+                                          n URLs from being loaded, by URL reg
+                                          ex and optionally via text match in
+                                          an iframe      [array] [default: []]
+    --blockMessage                        If specified, when a URL is blocked,
+                                           a record with this error message is
+                                           added instead              [string]
+    --blockAds, --blockads                If set, block advertisements from be
+                                          ing loaded (based on Stephen Black's
+                                           blocklist)
+                                                    [boolean] [default: false]
+    --adBlockMessage                      If specified, when an ad is blocked,
+                                           a record with this error message is
+                                           added instead              [string]
+-c, --collection                          Collection name to crawl to (replay
+                                          will be accessible under this name i
+                                          n pywb preview)
+                                               [string] [default: "crawl-@ts"]
+    --headless                            Run in headless mode, otherwise star
+                                          t xvfb    [boolean] [default: false]
+    --driver                              JS driver for the crawler
+                                      [string] [default: "./defaultDriver.js"]
+    --generateCDX, --generatecdx, --gene  If set, generate index (CDXJ) for us
+    rateCdx                               e with pywb after crawl is done
+                                                    [boolean] [default: false]
+    --combineWARC, --combinewarc, --comb  If set, combine the warcs
+    ineWarc                                         [boolean] [default: false]
+    --rolloverSize                        If set, declare the rollover size
+                                                [number] [default: 1000000000]
+    --generateWACZ, --generatewacz, --ge  If set, generate wacz
+    nerateWacz                                      [boolean] [default: false]
+    --logging                             Logging options for crawler, can inc
+                                          lude: stats, pywb, behaviors, behavi
+                                          ors-debug, jserrors
+                                                   [string] [default: "stats"]
+    --text                                If set, extract text to the pages.js
+                                          onl file  [boolean] [default: false]
+    --cwd                                 Crawl working directory for captures
+                                           (pywb root). If not set, defaults t
+                                          o process.cwd()
+                                                 [string] [default: "/crawls"]
+    --mobileDevice                        Emulate mobile device by name from:
+                                          https://github.com/puppeteer/puppete
+                                          er/blob/main/src/common/DeviceDescri
+                                          ptors.ts                    [string]
+    --userAgent                           Override user-agent with specified s
+                                          tring                       [string]
+    --userAgentSuffix                     Append suffix to existing browser us
+                                          er-agent (ex: +MyCrawler, info@examp
+                                          le.com)                     [string]
+    --useSitemap, --sitemap               If enabled, check for sitemaps at /s
+                                          itemap.xml, or custom URL if URL is
+                                          specified
+    --statsFilename                       If set, output stats as JSON to this
+                                           file. (Relative filename resolves t
+                                          o crawl working directory)
+    --behaviors                           Which background behaviors to enable
+                                           on each page
+              [string] [default: "autoplay,autofetch,autoscroll,siteSpecific"]
+    --behaviorTimeout                     If >0, timeout (in seconds) for in-p
+                                          age behavior will run on each page.
+                                          If 0, a behavior can run until finis
+                                          h.            [number] [default: 90]
+    --profile                             Path to tar.gz file which will be ex
+                                          tracted and used as the browser prof
+                                          ile                         [string]
+    --screenshot                          If set, take a 1920x1080 screenshot
+                                          of initially visible area of the pag
+                                          e, wrap them into WARC files and pla
+                                          ce them in the folder screenshots/
+                                                    [boolean] [default: false]
+    --fullPageScreenshot                  If set, take a full page screenshot
+                                          of the page, wrap them into WARC fil
+                                          es and place them in the folder scre
+                                          enshots/  [boolean] [default: false]
+    --thumbnail                           If set, take a thumbnail of initiall
+                                          y visible area of the page, wrap the
+                                          m into WARC files and place them in
+                                          the folder screenshots/
+                                                    [boolean] [default: false]
+    --screencastPort                      If set to a non-zero value, starts a
+                                          n HTTP server with screencast access
+                                          ible on this port
+                                                         [number] [default: 0]
+    --screencastRedis                     If set, will use the state store red
+                                          is pubsub for screencasting. Require
+                                          s --redisStoreUrl to be set
+                                                    [boolean] [default: false]
+    --warcInfo, --warcinfo                Optional fields added to the warcinf
+                                          o record in combined WARCs
+    --redisStoreUrl                       If set, url for remote redis server
+                                          to store state. Otherwise, using in-
+                                          memory store                [string]
+    --saveState                           If the crawl state should be seriali
+                                          zed to the crawls/ directory. Defaul
+                                          ts to 'partial', only saved when cra
+                                          wl is interrupted
+         [string] [choices: "never", "partial", "always"] [default: "partial"]
+    --saveStateInterval                   If save state is set to 'always', al
+                                          so save state during the crawl at th
+                                          is interval (in seconds)
+                                                       [number] [default: 300]
+    --saveStateHistory                    Number of save states to keep during
+                                           the duration of a crawl
+                                                         [number] [default: 5]
+    --sizeLimit                           If set, save state and exit if size
+                                          limit exceeds this value
+                                                         [number] [default: 0]
+    --timeLimit                           If set, save state and exit after ti
+                                          me limit, in seconds
+                                                         [number] [default: 0]
+    --healthCheckPort                     port to run healthcheck on
+                                                         [number] [default: 0]
+    --overwrite                           overwrite current crawl data: if set
+                                          , existing collection directory will
+                                           be deleted before crawl is started
+                                                    [boolean] [default: false]
+    --waitOnDone                          if set, wait for interrupt signal wh
+                                          en finished instead of exiting
+                                                    [boolean] [default: false]
+    --netIdleWait                         if set, wait for network idle after
+                                          page load and after behaviors are do
+                                          ne (in seconds). if -1 (default), de
+                                          termine based on scope
+                                                        [number] [default: -1]
+    --config                              Path to YAML config file
 ```
 </details>
 
@@ -478,16 +476,6 @@ docker run -p 9037:9037 -v $PWD/crawls:/crawls/ webrecorder/browsertrix-crawler 
 ```
 
 Then, you can open `http://localhost:9037/` and watch the crawl.
-
-Note: If specifying multiple workers, the crawler should additional be instructed to open each one in a new window, otherwise the screencasting can only update one page at a time.
-
-For example,
-
-```
-docker run -p 9037:9037 -v $PWD/crawls:/crawls/ webrecorder/browsertrix-crawler crawl --url https://www.example.com --screencastPort 9037 --newContext window --workers 3
-```
-
-will start a crawl with 3 workers, and show the screen of each of the workers from `http://localhost:9037/`.
 
 ### Uploading crawl output to S3-Compatible Storage
 
