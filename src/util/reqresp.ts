@@ -4,6 +4,7 @@ import { getStatusText } from "@webrecorder/wabac/src/utils.js";
 import { Protocol } from "puppeteer-core";
 import { postToGetUrl } from "warcio";
 import { HTML_TYPES } from "./constants.js";
+import { Response } from "undici";
 
 const CONTENT_LENGTH = "content-length";
 const CONTENT_TYPE = "content-type";
@@ -150,7 +151,7 @@ export class RequestResponseInfo {
   }
 
   isRedirectStatus() {
-    return this.status >= 300 && this.status < 400 && this.status !== 304;
+    return isRedirectStatus(this.status);
   }
 
   isSelfRedirect() {
@@ -234,13 +235,12 @@ export class RequestResponseInfo {
         if (header.name.startsWith(":")) {
           continue;
         }
-        if (EXCLUDE_HEADERS.includes(headerName)) {
-          headerName = "x-orig-" + headerName;
-          continue;
-        }
         if (actualContentLength && headerName === CONTENT_LENGTH) {
           headersDict[headerName] = "" + actualContentLength;
           continue;
+        }
+        if (EXCLUDE_HEADERS.includes(headerName)) {
+          headerName = "x-orig-" + headerName;
         }
         headersDict[headerName] = this._encodeHeaderValue(header.value);
       }
@@ -256,16 +256,18 @@ export class RequestResponseInfo {
         continue;
       }
       const keyLower = key.toLowerCase();
-      if (EXCLUDE_HEADERS.includes(keyLower)) {
-        headersDict["x-orig-" + key] = headersDict[key];
-        delete headersDict[key];
-        continue;
-      }
       if (actualContentLength && keyLower === CONTENT_LENGTH) {
         headersDict[key] = "" + actualContentLength;
         continue;
       }
-      headersDict[key] = this._encodeHeaderValue(headersDict[key]);
+      const value = this._encodeHeaderValue(headersDict[key]);
+
+      if (EXCLUDE_HEADERS.includes(keyLower)) {
+        headersDict["x-orig-" + key] = value;
+        delete headersDict[key];
+      } else {
+        headersDict[key] = value;
+      }
     }
 
     return headersDict;
@@ -316,10 +318,14 @@ export class RequestResponseInfo {
     // skip cached, OPTIONS/HEAD responses, and 304 or 206 responses
     if (
       this.fromCache ||
-      !this.payload ||
       (this.method && ["OPTIONS", "HEAD"].includes(this.method)) ||
       [206, 304].includes(this.status)
     ) {
+      return true;
+    }
+
+    // skip no payload response only if its not a redirect
+    if (!this.payload && !this.isRedirectStatus()) {
       return true;
     }
 
@@ -362,24 +368,17 @@ export class RequestResponseInfo {
     // check if not ASCII, then encode, replace encoded newlines
     // eslint-disable-next-line no-control-regex
     if (!/^[\x00-\x7F]*$/.test(value)) {
-      return encodeURI(value).replace(/%0A/g, ", ");
+      value = encodeURI(value).replace(/%0A/g, ", ");
     }
     // replace newlines with spaces
     return value.replace(/\n/g, ", ");
   }
 }
 
-export function isHTMLContentType(contentType: string | null) {
-  // just load if no content-type
-  if (!contentType) {
-    return true;
-  }
+export function isHTMLMime(mime: string) {
+  return HTML_TYPES.includes(mime);
+}
 
-  const mime = contentType.split(";")[0];
-
-  if (HTML_TYPES.includes(mime)) {
-    return true;
-  }
-
-  return false;
+export function isRedirectStatus(status: number) {
+  return status >= 300 && status < 400 && status !== 304;
 }

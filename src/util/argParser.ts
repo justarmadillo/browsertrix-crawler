@@ -377,7 +377,7 @@ class ArgParser {
 
       redisStoreUrl: {
         describe:
-          "If set, url for remote redis server to store state. Otherwise, using in-memory store",
+          "If set, url for remote redis server to store state. Otherwise, using local redis instance",
         type: "string",
         default: "redis://localhost:6379/0",
       },
@@ -531,6 +531,11 @@ class ArgParser {
         type: "boolean",
       },
 
+      debugAccessBrowser: {
+        describe: "if set, allow debugging browser on port 9222 via CDP",
+        type: "boolean",
+      },
+
       warcPrefix: {
         describe:
           "prefix for WARC files generated, including WARCs added to WACZ",
@@ -543,6 +548,18 @@ class ArgParser {
           "service worker handling: disabled, enabled, or disabled with custom profile",
         choices: SERVICE_WORKER_OPTS,
         default: "disabled",
+      },
+
+      proxyServer: {
+        describe:
+          "if set, will use specified proxy server. Takes precedence over any env var proxy settings",
+        type: "string",
+      },
+
+      dryRun: {
+        describe:
+          "If true, no archive data is written to disk, only pages and logs (and optionally saved state).",
+        type: "boolean",
       },
 
       qaSource: {
@@ -675,7 +692,13 @@ class ArgParser {
 
         try {
           argv.scopedSeeds.push(new ScopedSeed({ ...scopeOpts, ...seed }));
-        } catch (e) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } catch (e: any) {
+          logger.error("Failed to create seed", {
+            error: e.toString(),
+            ...scopeOpts,
+            ...seed,
+          });
           if (argv.failOnFailedSeed) {
             logger.fatal(
               "Invalid seed specified, aborting crawl",

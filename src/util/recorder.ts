@@ -6,10 +6,15 @@ import PQueue from "p-queue";
 
 import { logger, formatErr } from "./logger.js";
 import { sleep, timedRun, timestampNow } from "./timing.js";
-import { RequestResponseInfo, isHTMLContentType } from "./reqresp.js";
+import { RequestResponseInfo, isHTMLMime } from "./reqresp.js";
 
-// @ts-expect-error TODO fill in why error is expected
-import { baseRules as baseDSRules } from "@webrecorder/wabac/src/rewrite/index.js";
+import { fetch, Response } from "undici";
+
+import {
+  baseRules as baseDSRules,
+  htmlRules as htmlDSRules,
+  // @ts-expect-error TODO fill in why error is expected
+} from "@webrecorder/wabac/src/rewrite/index.js";
 import {
   rewriteDASH,
   rewriteHLS,
@@ -83,6 +88,13 @@ export type DirectFetchRequest = {
   url: string;
   headers: Record<string, string>;
   cdp: CDPSession;
+};
+
+// =================================================================
+export type DirectFetchResponse = {
+  fetched: boolean;
+  mime: string;
+  ts: Date;
 };
 
 // =================================================================
@@ -250,7 +262,7 @@ export class Recorder {
   handleResponseReceived(params: Protocol.Network.ResponseReceivedEvent) {
     const { requestId, response, type } = params;
 
-    const { mimeType, url } = response;
+    const { mimeType, url, headers } = response;
 
     logNetwork("Network.responseReceived", {
       requestId,
@@ -259,6 +271,10 @@ export class Recorder {
     });
 
     if (mimeType === MIME_EVENT_STREAM) {
+      return;
+    }
+
+    if (this.shouldSkip(headers, url, undefined, type)) {
       return;
     }
 
@@ -910,9 +926,10 @@ export class Recorder {
       case "text/javascript":
       case "application/javascript":
       case "application/x-javascript": {
-        const rw = baseDSRules.getRewriter(url);
+        const rules = contentType === "text/html" ? htmlDSRules : baseDSRules;
+        const rw = rules.getRewriter(url);
 
-        if (rw !== baseDSRules.defaultRewriter) {
+        if (rw !== rules.defaultRewriter) {
           string = payload.toString();
           newString = rw.rewrite(string, { live: true, save: extraOpts });
         }
@@ -1049,13 +1066,17 @@ export class Recorder {
       );
       return;
     } else if (reqresp.shouldSkipSave()) {
-      logNetwork("Skipping writing request/response", {
-        requestId,
-        url,
-        method,
-        status,
-        payloadLength: (payload && payload.length) || 0,
-      });
+      logger.debug(
+        "Skipping writing request/response",
+        {
+          requestId,
+          url,
+          method,
+          status,
+          payloadLength: (payload && payload.length) || 0,
+        },
+        "recorder",
+      );
       return;
     }
 
@@ -1074,11 +1095,11 @@ export class Recorder {
     this.writer.writeRecordPair(responseRecord, requestRecord);
   }
 
-  async directFetchCapture({ url, headers, cdp }: DirectFetchRequest): Promise<{
-    fetched: boolean;
-    mime: string;
-    ts: Date;
-  }> {
+  async directFetchCapture({
+    url,
+    headers,
+    cdp,
+  }: DirectFetchRequest): Promise<DirectFetchResponse> {
     const reqresp = new RequestResponseInfo("0");
     const ts = new Date();
 
@@ -1111,7 +1132,7 @@ export class Recorder {
         mime = ct.split(";")[0];
       }
 
-      return !isHTMLContentType(mime);
+      return !isHTMLMime(mime);
     };
 
     // ignore dupes: if previous URL was not a page, still load as page. if previous was page,
@@ -1321,7 +1342,7 @@ class AsyncFetcher {
       if (e.message === "response-filtered-out") {
         throw e;
       }
-      logger.error(
+      logger.debug(
         "Streaming Fetch Error",
         { url, networkId, filename, ...formatErr(e), ...logDetails },
         "recorder",
@@ -1558,9 +1579,11 @@ function createResponse(
   const statusline = `HTTP/1.1 ${reqresp.status} ${reqresp.statusText}`;
   const date = new Date(reqresp.ts).toISOString();
 
-  const httpHeaders = reqresp.getResponseHeadersDict(
-    reqresp.payload ? reqresp.payload.length : 0,
-  );
+  if (!reqresp.payload) {
+    reqresp.payload = new Uint8Array();
+  }
+
+  const httpHeaders = reqresp.getResponseHeadersDict(reqresp.payload.length);
 
   const warcHeaders: Record<string, string> = {
     "WARC-Page-ID": pageid,

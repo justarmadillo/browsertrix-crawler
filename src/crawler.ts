@@ -45,17 +45,26 @@ import {
   ADD_LINK_FUNC,
   BEHAVIOR_LOG_FUNC,
   DEFAULT_SELECTORS,
+  DISPLAY,
 } from "./util/constants.js";
 
 import { AdBlockRules, BlockRules } from "./util/blockrules.js";
 import { OriginOverride } from "./util/originoverride.js";
 
-import { CDPSession, Frame, HTTPRequest, Page, Protocol } from "puppeteer-core";
+import {
+  CDPSession,
+  Frame,
+  HTTPRequest,
+  HTTPResponse,
+  Page,
+  Protocol,
+} from "puppeteer-core";
 import { Recorder } from "./util/recorder.js";
 import { SitemapReader } from "./util/sitemapper.js";
 import { ScopedSeed } from "./util/seeds.js";
 import { WARCWriter, createWARCInfo, setWARCInfo } from "./util/warcwriter.js";
-import { isHTMLContentType } from "./util/reqresp.js";
+import { isHTMLMime, isRedirectStatus } from "./util/reqresp.js";
+import { initProxy } from "./util/proxy.js";
 
 const behaviors = fs.readFileSync(
   new URL(
@@ -122,6 +131,9 @@ export class Crawler {
 
   maxPageTime: number;
 
+  seeds: ScopedSeed[];
+  numOriginalSeeds = 0;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   emulateDevice: any = {};
 
@@ -170,6 +182,8 @@ export class Crawler {
   maxHeapUsed = 0;
   maxHeapTotal = 0;
 
+  proxyServer?: string;
+
   driver!: (opts: {
     page: Page;
     data: PageState;
@@ -177,7 +191,7 @@ export class Crawler {
     crawler: Crawler;
   }) => NonNullable<unknown>;
 
-  recording = true;
+  recording: boolean;
 
   constructor() {
     const args = this.parseArgs();
@@ -211,6 +225,13 @@ export class Crawler {
 
     logger.debug("Writing log to: " + this.logFilename, {}, "general");
 
+    this.recording = !this.params.dryRun;
+    if (this.params.dryRun) {
+      logger.warn(
+        "Dry run mode: no archived data stored, only pages and logging. Storage and archive creation related options will be ignored.",
+      );
+    }
+
     this.headers = {};
 
     // pages file
@@ -233,6 +254,9 @@ export class Crawler {
 
     this.saveStateFiles = [];
     this.lastSaveTime = 0;
+
+    this.seeds = this.params.scopedSeeds as ScopedSeed[];
+    this.numOriginalSeeds = this.seeds.length;
 
     // sum of page load + behavior timeouts + 2 x fetch + cloudflare + link extraction timeouts + extra page delay
     // if exceeded, will interrupt and move on to next page (likely behaviors or some other operation is stuck)
@@ -350,11 +374,7 @@ export class Crawler {
 
     // load full state from config
     if (this.params.state) {
-      await this.crawlState.load(
-        this.params.state,
-        this.params.scopedSeeds,
-        true,
-      );
+      await this.crawlState.load(this.params.state, this.seeds, true);
       // otherwise, just load extra seeds
     } else {
       await this.loadExtraSeeds();
@@ -383,8 +403,8 @@ export class Crawler {
     const extraSeeds = await this.crawlState.getExtraSeeds();
 
     for (const { origSeedId, newUrl } of extraSeeds) {
-      const seed = this.params.scopedSeeds[origSeedId];
-      this.params.scopedSeeds.push(seed.newScopedSeed(newUrl));
+      const seed = this.seeds[origSeedId];
+      this.seeds.push(seed.newScopedSeed(newUrl));
     }
   }
 
@@ -436,12 +456,17 @@ export class Crawler {
   async bootstrap() {
     const subprocesses: ChildProcess[] = [];
 
+    this.proxyServer = initProxy(this.params.proxyServer);
+
     subprocesses.push(this.launchRedis());
 
     await fsp.mkdir(this.logDir, { recursive: true });
-    await fsp.mkdir(this.archivesDir, { recursive: true });
-    await fsp.mkdir(this.tempdir, { recursive: true });
-    await fsp.mkdir(this.tempCdxDir, { recursive: true });
+
+    if (!this.params.dryRun) {
+      await fsp.mkdir(this.archivesDir, { recursive: true });
+      await fsp.mkdir(this.tempdir, { recursive: true });
+      await fsp.mkdir(this.tempCdxDir, { recursive: true });
+    }
 
     this.logFH = fs.createWriteStream(this.logFilename, { flags: "a" });
     logger.setExternalLogStream(this.logFH);
@@ -450,7 +475,7 @@ export class Crawler {
     setWARCInfo(this.infoString, this.params.warcInfo);
     logger.info(this.infoString);
 
-    logger.info("Seeds", this.params.scopedSeeds);
+    logger.info("Seeds", this.seeds);
 
     if (this.params.profile) {
       logger.info("With Browser Profile", { url: this.params.profile });
@@ -479,17 +504,19 @@ export class Crawler {
       }
     });
 
-    child_process.spawn(
-      "socat",
-      ["tcp-listen:9222,reuseaddr,fork", "tcp:localhost:9221"],
-      { detached: RUN_DETACHED },
-    );
+    if (this.params.debugAccessBrowser) {
+      child_process.spawn(
+        "socat",
+        ["tcp-listen:9222,reuseaddr,fork", "tcp:localhost:9221"],
+        { detached: RUN_DETACHED },
+      );
+    }
 
     if (!this.params.headless && !process.env.NO_XVFB) {
       child_process.spawn(
         "Xvfb",
         [
-          process.env.DISPLAY || "",
+          DISPLAY,
           "-listen",
           "tcp",
           "-screen",
@@ -503,10 +530,10 @@ export class Crawler {
       );
     }
 
-    if (this.params.screenshot) {
+    if (this.params.screenshot && !this.params.dryRun) {
       this.screenshotWriter = this.createExtraResourceWarcWriter("screenshots");
     }
-    if (this.params.text) {
+    if (this.params.text && !this.params.dryRun) {
       this.textWriter = this.createExtraResourceWarcWriter("text");
     }
   }
@@ -594,7 +621,7 @@ export class Crawler {
     }
   }
 
-  isInScope(
+  protected getScope(
     {
       seedId,
       url,
@@ -603,9 +630,25 @@ export class Crawler {
     }: { seedId: number; url: string; depth: number; extraHops: number },
     logDetails = {},
   ) {
-    const seed = this.params.scopedSeeds[seedId];
+    return this.seeds[seedId].isIncluded(url, depth, extraHops, logDetails);
+  }
 
-    return seed.isIncluded(url, depth, extraHops, logDetails);
+  async isInScope(
+    {
+      seedId,
+      url,
+      depth,
+      extraHops,
+    }: { seedId: number; url: string; depth: number; extraHops: number },
+    logDetails = {},
+  ): Promise<boolean> {
+    const seed = await this.crawlState.getSeedAt(
+      this.seeds,
+      this.numOriginalSeeds,
+      seedId,
+    );
+
+    return !!seed.isIncluded(url, depth, extraHops, logDetails);
   }
 
   async setupPage({
@@ -775,7 +818,20 @@ self.__bx_behaviors.selectMainBehavior();
     const { page, cdp, data, workerid, callbacks, directFetchCapture } = opts;
     data.callbacks = callbacks;
 
-    const { url } = data;
+    const { url, seedId } = data;
+
+    const auth = this.seeds[seedId].authHeader();
+
+    if (auth) {
+      logger.debug("Setting HTTP basic auth for seed", {
+        seedId,
+        seedUrl: this.seeds[seedId].url,
+      });
+      await page.setExtraHTTPHeaders({ Authorization: auth });
+      opts.isAuthSet = true;
+    } else if (opts.isAuthSet) {
+      await page.setExtraHTTPHeaders({});
+    }
 
     const logDetails = { page: url, workerid };
     data.logDetails = logDetails;
@@ -793,7 +849,7 @@ self.__bx_behaviors.selectMainBehavior();
         );
         if (mime) {
           data.mime = mime;
-          data.isHTMLPage = isHTMLContentType(mime);
+          data.isHTMLPage = isHTMLMime(mime);
         }
         if (fetched) {
           data.loadState = LoadState.FULL_PAGE_LOADED;
@@ -823,18 +879,21 @@ self.__bx_behaviors.selectMainBehavior();
     data.favicon = await this.getFavicon(page, logDetails);
 
     await this.doPostLoadActions(opts);
+
+    await this.awaitPageExtraDelay(opts);
   }
 
   async doPostLoadActions(opts: WorkerState, saveOutput = false) {
     const { page, cdp, data, workerid } = opts;
     const { url } = data;
 
+    if (!data.isHTMLPage) {
+      return;
+    }
+
     const logDetails = { page: url, workerid };
 
     if (this.params.screenshot && this.screenshotWriter) {
-      if (!data.isHTMLPage) {
-        logger.debug("Skipping screenshots for non-HTML page", logDetails);
-      }
       const screenshots = new Screenshots({
         browser: this.browser,
         page,
@@ -854,7 +913,7 @@ self.__bx_behaviors.selectMainBehavior();
 
     let textextract = null;
 
-    if (data.isHTMLPage && this.textWriter) {
+    if (this.textWriter) {
       textextract = new TextExtractViaSnapshot(cdp, {
         writer: this.textWriter,
         url,
@@ -874,13 +933,7 @@ self.__bx_behaviors.selectMainBehavior();
     data.loadState = LoadState.EXTRACTION_DONE;
 
     if (this.params.behaviorOpts && data.status < 400) {
-      if (!data.isHTMLPage) {
-        logger.debug(
-          "Skipping behaviors for non-HTML page",
-          logDetails,
-          "behavior",
-        );
-      } else if (data.skipBehaviors) {
+      if (data.skipBehaviors) {
         logger.info("Skipping behaviors for slow page", logDetails, "behavior");
       } else {
         const res = await timedRun(
@@ -895,6 +948,7 @@ self.__bx_behaviors.selectMainBehavior();
           "Behaviors timed out",
           logDetails,
           "behavior",
+          true,
         );
 
         await this.netIdle(page, logDetails);
@@ -908,8 +962,17 @@ self.__bx_behaviors.selectMainBehavior();
         }
       }
     }
+  }
 
+  async awaitPageExtraDelay(opts: WorkerState) {
     if (this.params.pageExtraDelay) {
+      const {
+        data: { url: page },
+        workerid,
+      } = opts;
+
+      const logDetails = { page, workerid };
+
       logger.info(
         `Waiting ${this.params.pageExtraDelay} seconds before moving on to next page`,
         logDetails,
@@ -934,12 +997,6 @@ self.__bx_behaviors.selectMainBehavior();
         this.healthChecker.resetErrors();
       }
     } else {
-      logger.warn(
-        "Page Load Failed",
-        { loadState, ...logDetails },
-        "pageStatus",
-      );
-
       await this.crawlState.markFailed(data.url);
 
       if (this.healthChecker) {
@@ -1089,7 +1146,7 @@ self.__bx_behaviors.selectMainBehavior();
   async checkLimits() {
     let interrupt = false;
 
-    const size = await getDirSize(this.archivesDir);
+    const size = this.params.dryRun ? 0 : await getDirSize(this.archivesDir);
 
     await this.crawlState.setArchiveSize(size);
 
@@ -1114,7 +1171,11 @@ self.__bx_behaviors.selectMainBehavior();
 
     if (this.params.diskUtilization) {
       // Check that disk usage isn't already or soon to be above threshold
-      const diskUtil = await checkDiskUtilization(this.params, size);
+      const diskUtil = await checkDiskUtilization(
+        this.collDir,
+        this.params,
+        size,
+      );
       if (diskUtil.stop === true) {
         interrupt = true;
       }
@@ -1289,7 +1350,7 @@ self.__bx_behaviors.selectMainBehavior();
       emulateDevice: this.emulateDevice,
       swOpt: this.params.serviceWorker,
       chromeOptions: {
-        proxy: false,
+        proxy: this.proxyServer,
         userAgent: this.emulateDevice.userAgent,
         extraArgs: this.extraChromeArgs(),
       },
@@ -1364,8 +1425,8 @@ self.__bx_behaviors.selectMainBehavior();
   }
 
   protected async _addInitialSeeds() {
-    for (let i = 0; i < this.params.scopedSeeds.length; i++) {
-      const seed = this.params.scopedSeeds[i];
+    for (let i = 0; i < this.seeds.length; i++) {
+      const seed = this.seeds[i];
       if (!(await this.queueUrl(i, seed.url, 0, 0))) {
         if (this.limitHit) {
           break;
@@ -1385,11 +1446,11 @@ self.__bx_behaviors.selectMainBehavior();
   }
 
   async postCrawl() {
-    if (this.params.combineWARC) {
+    if (this.params.combineWARC && !this.params.dryRun) {
       await this.combineWARC();
     }
 
-    if (this.params.generateCDX) {
+    if (this.params.generateCDX && !this.params.dryRun) {
       logger.info("Generating CDX");
       await fsp.mkdir(path.join(this.collDir, "indexes"), { recursive: true });
       await this.crawlState.setStatus("generate-cdx");
@@ -1421,6 +1482,7 @@ self.__bx_behaviors.selectMainBehavior();
 
     if (
       this.params.generateWACZ &&
+      !this.params.dryRun &&
       (!this.interrupted || this.finalExit || this.uploadAndDeleteLocal)
     ) {
       const uploaded = await this.generateWACZ();
@@ -1655,108 +1717,71 @@ self.__bx_behaviors.selectMainBehavior();
 
     const failCrawlOnError = depth === 0 && this.params.failOnFailedSeed;
 
-    let ignoreAbort = false;
+    // Attempt to load the page:
+    // - Already tried direct fetch w/o browser before getting here, and that resulted in an HTML page or non-200 response
+    //   so now loading using the browser
+    // - If page.load() fails, but downloadResponse is set, then its a download, consider successful
+    //   set page status to FULL_PAGE_LOADED (2)
+    // - If page.load() fails, but firstResponse is set to CONTENT_LOADED (1) state,
+    //   consider a slow page, proceed to link extraction, but skip behaviors, issue warning
+    // - If page.load() fails otherwise and if failOnFailedSeed is set, fail crawl, otherwise fail page
+    // - If page.load() succeeds, check if page url is a chrome-error:// page, fail page (and or crawl if failOnFailedSeed and seed)
+    // - If at least one response, check if HTML, proceed with post-crawl actions only if HTML.
 
-    // Detect if ERR_ABORTED is actually caused by trying to load a non-page (eg. downloadable PDF),
-    // if so, don't report as an error
+    let downloadResponse: HTTPResponse | null = null;
+    let firstResponse: HTTPResponse | null = null;
+    let fullLoadedResponse: HTTPResponse | null = null;
+
+    // Detect if failure is actually caused by trying to load a non-page (eg. downloadable PDF),
+    // store the downloadResponse, if any
     page.once("requestfailed", (req: HTTPRequest) => {
-      ignoreAbort = shouldIgnoreAbort(req, data);
+      downloadResponse = getDownloadResponse(req);
     });
 
-    let isHTMLPage = data.isHTMLPage;
+    // store the first successful non-redirect response, even if page doesn't load fully
+    const waitFirstResponse = (resp: HTTPResponse) => {
+      firstResponse = resp;
+      if (!isRedirectStatus(firstResponse.status())) {
+        // don't listen to any additional responses
+        page.off("response", waitFirstResponse);
+      }
+    };
 
-    if (isHTMLPage) {
-      page.once("domcontentloaded", () => {
-        data.loadState = LoadState.CONTENT_LOADED;
-      });
-    }
+    page.on("response", waitFirstResponse);
 
-    const gotoOpts = isHTMLPage
+    // store that domcontentloaded was finished
+    page.once("domcontentloaded", () => {
+      data.loadState = LoadState.CONTENT_LOADED;
+    });
+
+    const gotoOpts = data.isHTMLPage
       ? this.gotoOpts
       : { waitUntil: "domcontentloaded" };
 
     logger.info("Awaiting page load", logDetails);
 
     try {
-      const resp = await page.goto(url, gotoOpts);
-
-      if (!resp) {
-        throw new Error("page response missing");
-      }
-
-      const respUrl = resp.url();
-      const isChromeError = page.url().startsWith("chrome-error://");
-
-      if (depth === 0 && !isChromeError && respUrl !== url) {
-        data.seedId = await this.crawlState.addExtraSeed(
-          this.params.scopedSeeds,
-          data.seedId,
-          respUrl,
-        );
-        logger.info("Seed page redirected, adding redirected seed", {
-          origUrl: url,
-          newUrl: respUrl,
-          seedId: data.seedId,
-        });
-      }
-
-      const status = resp.status();
-      data.status = status;
-
-      let failed = isChromeError;
-
-      if (this.params.failOnInvalidStatus && status >= 400) {
-        // Handle 4xx or 5xx response as a page load error
-        failed = true;
-      }
-
-      if (failed) {
-        if (failCrawlOnError) {
-          logger.fatal(
-            "Seed Page Load Error, failing crawl",
-            {
-              status,
-              ...logDetails,
-            },
-            "general",
-            1,
-          );
-        } else {
-          logger.error(
-            isChromeError ? "Page Crashed on Load" : "Page Invalid Status",
-            {
-              status,
-              ...logDetails,
-            },
-          );
-          throw new Error("logged");
-        }
-      }
-
-      const contentType = resp.headers()["content-type"];
-
-      isHTMLPage = isHTMLContentType(contentType);
-
-      if (contentType) {
-        data.mime = contentType.split(";")[0];
-      }
+      // store the page load response when page fully loads
+      fullLoadedResponse = await page.goto(url, gotoOpts);
     } catch (e) {
       if (!(e instanceof Error)) {
         throw e;
       }
       const msg = e.message || "";
-      if (!msg.startsWith("net::ERR_ABORTED") || !ignoreAbort) {
+
+      // got firstResponse and content loaded, not a failure
+      if (firstResponse && data.loadState == LoadState.CONTENT_LOADED) {
         // if timeout error, and at least got to content loaded, continue on
-        if (
-          e.name === "TimeoutError" &&
-          data.loadState == LoadState.CONTENT_LOADED
-        ) {
-          logger.warn("Page Loading Slowly, skipping behaviors", {
+        logger.warn(
+          "Page load timed out, loading but slowly, skipping behaviors",
+          {
             msg,
             ...logDetails,
-          });
-          data.skipBehaviors = true;
-        } else if (failCrawlOnError) {
+          },
+        );
+        data.skipBehaviors = true;
+      } else if (!downloadResponse) {
+        if (failCrawlOnError) {
           // if fail on error, immediately fail here
           logger.fatal(
             "Page Load Timeout, failing crawl",
@@ -1767,57 +1792,142 @@ self.__bx_behaviors.selectMainBehavior();
             "general",
             1,
           );
-        } else {
-          // log if not already log and rethrow
-          if (msg !== "logged") {
-            logger.error("Page Load Timeout, skipping page", {
-              msg,
-              ...logDetails,
-            });
-            e.message = "logged";
-          }
-          throw e;
+          // log if not already log and rethrow, consider page failed
+        } else if (msg !== "logged") {
+          logger.error("Page Load Failed, skipping page", {
+            msg,
+            loadState: data.loadState,
+            ...logDetails,
+          });
+          e.message = "logged";
         }
+        throw e;
       }
     }
 
-    data.loadState = LoadState.FULL_PAGE_LOADED;
+    const resp = fullLoadedResponse || downloadResponse || firstResponse;
 
-    data.isHTMLPage = isHTMLPage;
-
-    if (isHTMLPage) {
-      const frames = await page.frames();
-
-      const filteredFrames = await Promise.allSettled(
-        frames.map((frame) => this.shouldIncludeFrame(frame, logDetails)),
-      );
-
-      data.filteredFrames = filteredFrames
-        .filter((x: PromiseSettledResult<Frame | null>) => {
-          if (x.status === "fulfilled") {
-            return !!x.value;
-          }
-          logger.warn("Error in iframe check", {
-            reason: x.reason,
-            ...logDetails,
-          });
-          return false;
-        })
-        .map((x) => (x as PromiseFulfilledResult<Frame>).value);
-
-      //data.filteredFrames = await page.frames().filter(frame => this.shouldIncludeFrame(frame, logDetails));
-    } else {
-      data.filteredFrames = [];
+    if (!resp) {
+      throw new Error("no response for page load, assuming failed");
     }
 
-    if (!isHTMLPage) {
-      logger.debug("Skipping link extraction for non-HTML page", logDetails);
+    const respUrl = resp.url();
+    const isChromeError = page.url().startsWith("chrome-error://");
+
+    if (depth === 0 && !isChromeError && respUrl !== url && !downloadResponse) {
+      data.seedId = await this.crawlState.addExtraSeed(
+        this.seeds,
+        this.numOriginalSeeds,
+        data.seedId,
+        respUrl,
+      );
+      logger.info("Seed page redirected, adding redirected seed", {
+        origUrl: url,
+        newUrl: respUrl,
+        seedId: data.seedId,
+      });
+    }
+
+    const status = resp.status();
+    data.status = status;
+
+    let failed = isChromeError;
+
+    if (this.params.failOnInvalidStatus && status >= 400) {
+      // Handle 4xx or 5xx response as a page load error
+      failed = true;
+    }
+
+    if (failed) {
+      if (failCrawlOnError) {
+        logger.fatal(
+          "Seed Page Load Error, failing crawl",
+          {
+            status,
+            ...logDetails,
+          },
+          "general",
+          1,
+        );
+      } else {
+        logger.error(
+          isChromeError ? "Page Crashed on Load" : "Page Invalid Status",
+          {
+            status,
+            ...logDetails,
+          },
+        );
+        throw new Error("logged");
+      }
+    }
+
+    const contentType = resp.headers()["content-type"];
+
+    if (contentType) {
+      data.mime = contentType.split(";")[0];
+      data.isHTMLPage = isHTMLMime(data.mime);
+    } else {
+      // guess that its html if it fully loaded as a page
+      data.isHTMLPage = !!fullLoadedResponse;
+    }
+
+    // Full Page Loaded if:
+    // - it was a download response
+    // - page.load() succeeded
+    // but not:
+    // - if first response was received, but not fully loaded
+    if (fullLoadedResponse || downloadResponse) {
+      data.loadState = LoadState.FULL_PAGE_LOADED;
+    }
+
+    if (!data.isHTMLPage) {
+      data.filteredFrames = [];
+
+      logger.info(
+        "Non-HTML Page URL, skipping all post-crawl actions",
+        { isDownload: !!downloadResponse, mime: data.mime, ...logDetails },
+        "pageStatus",
+      );
       return;
     }
 
+    // HTML Pages Only here
+    const frames = await page.frames();
+
+    const filteredFrames = await Promise.allSettled(
+      frames.map((frame) => this.shouldIncludeFrame(frame, logDetails)),
+    );
+
+    data.filteredFrames = filteredFrames
+      .filter((x: PromiseSettledResult<Frame | null>) => {
+        if (x.status === "fulfilled") {
+          return !!x.value;
+        }
+        logger.warn("Error in iframe check", {
+          reason: x.reason,
+          ...logDetails,
+        });
+        return false;
+      })
+      .map((x) => (x as PromiseFulfilledResult<Frame>).value);
+
+    //data.filteredFrames = await page.frames().filter(frame => this.shouldIncludeFrame(frame, logDetails));
+
     const { seedId } = data;
 
-    const seed = this.params.scopedSeeds[seedId];
+    const seed = await this.crawlState.getSeedAt(
+      this.seeds,
+      this.numOriginalSeeds,
+      seedId,
+    );
+
+    if (!seed) {
+      logger.error(
+        "Seed not found, likely invalid crawl state - skipping link extraction and behaviors",
+        { seedId, ...logDetails },
+      );
+      return;
+    }
 
     await this.checkCF(page, logDetails);
 
@@ -1970,7 +2080,7 @@ self.__bx_behaviors.selectMainBehavior();
       const newExtraHops = extraHops + 1;
 
       for (const possibleUrl of urls) {
-        const res = this.isInScope(
+        const res = this.getScope(
           { url: possibleUrl, extraHops: newExtraHops, depth, seedId },
           logDetails,
         );
@@ -2121,11 +2231,13 @@ self.__bx_behaviors.selectMainBehavior();
     let { ts } = state;
     if (!ts) {
       ts = new Date();
-      logger.warn(
-        "Page date missing, setting to now",
-        { url, ts },
-        "pageStatus",
-      );
+      if (!this.params.dryRun) {
+        logger.warn(
+          "Page date missing, setting to now",
+          { url, ts },
+          "pageStatus",
+        );
+      }
     }
 
     row.ts = ts.toISOString();
@@ -2491,35 +2603,39 @@ self.__bx_behaviors.selectMainBehavior();
   }
 }
 
-function shouldIgnoreAbort(req: HTTPRequest, data: PageState) {
+function getDownloadResponse(req: HTTPRequest) {
   try {
+    if (!req.isNavigationRequest()) {
+      return null;
+    }
+
     const failure = req.failure();
     const failureText = (failure && failure.errorText) || "";
     if (
       failureText !== "net::ERR_ABORTED" ||
       req.resourceType() !== "document"
     ) {
-      return false;
+      return null;
     }
 
     const resp = req.response();
-    const headers = resp && resp.headers();
 
-    if (!headers) {
-      return false;
+    if (!resp) {
+      return null;
     }
+
+    const headers = resp.headers();
 
     if (
       headers["content-disposition"] ||
-      (headers["content-type"] && !headers["content-type"].startsWith("text/"))
+      (headers["content-type"] && !isHTMLMime(headers["content-type"]))
     ) {
-      data.status = resp.status();
-      data.mime = headers["content-type"].split(";")[0];
-      return true;
+      return resp;
     }
   } catch (e) {
-    return false;
+    console.log(e);
+    // ignore
   }
 
-  return false;
+  return null;
 }

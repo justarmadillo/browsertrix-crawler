@@ -15,6 +15,7 @@ import { Browser } from "./util/browser.js";
 import { initStorage } from "./util/storage.js";
 import { CDPSession, Page, PuppeteerLifeCycleEvent } from "puppeteer-core";
 import { getInfoString } from "./util/file_reader.js";
+import { DISPLAY } from "./util/constants.js";
 
 const profileHTML = fs.readFileSync(
   new URL("../html/createProfile.html", import.meta.url),
@@ -99,9 +100,10 @@ function cliOpts(): { [key: string]: Options } {
       default: getDefaultWindowSize(),
     },
 
-    proxy: {
-      type: "boolean",
-      default: false,
+    proxyServer: {
+      describe:
+        "if set, will use specified proxy server. Takes precedence over any env var proxy settings",
+      type: "string",
     },
 
     cookieDays: {
@@ -142,7 +144,7 @@ async function main() {
   if (!params.headless) {
     logger.debug("Launching XVFB");
     child_process.spawn("Xvfb", [
-      process.env.DISPLAY || "",
+      DISPLAY,
       "-listen",
       "tcp",
       "-screen",
@@ -168,7 +170,7 @@ async function main() {
       "-passwd",
       process.env.VNC_PASS || "",
       "-display",
-      process.env.DISPLAY || "",
+      DISPLAY,
     ]);
   }
 
@@ -179,7 +181,7 @@ async function main() {
     headless: params.headless,
     signals: false,
     chromeOptions: {
-      proxy: false,
+      proxy: params.proxyServer,
       extraArgs: [
         "--window-position=0,0",
         `--window-size=${params.windowSize}`,
@@ -393,10 +395,13 @@ class InteractiveBrowser {
     targetId: string,
   ) {
     logger.info("Creating Profile Interactively...");
-    child_process.spawn("socat", [
-      "tcp-listen:9222,reuseaddr,fork",
-      "tcp:localhost:9221",
-    ]);
+
+    if (params.headless) {
+      child_process.spawn("socat", [
+        "tcp-listen:9222,reuseaddr,fork",
+        "tcp:localhost:9221",
+      ]);
+    }
 
     this.params = params;
     this.browser = browser;

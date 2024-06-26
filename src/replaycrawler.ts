@@ -166,7 +166,7 @@ export class ReplayCrawler extends Crawler {
     await this.loadPages(this.qaSource);
   }
 
-  isInScope() {
+  async isInScope() {
     return true;
   }
 
@@ -456,6 +456,8 @@ export class ReplayCrawler extends Crawler {
     data.favicon = await this.getFavicon(page, {});
 
     await this.doPostLoadActions(opts, true);
+
+    await this.awaitPageExtraDelay(opts);
 
     await this.compareScreenshots(page, data, url, date, workerid);
 
